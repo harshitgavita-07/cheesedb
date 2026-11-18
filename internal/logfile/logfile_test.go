@@ -351,6 +351,32 @@ func TestDamageInSealedSegmentIsCorrupt(t *testing.T) {
 	}
 }
 
+// TestDamageInFirstRecordIsCorrupt: the log's first batch was fsynced
+// before Append returned, so a crash cannot leave it unreadable. Failing
+// the very first record means acknowledged history was edited or rotted;
+// cutting the whole log as a "torn tail" would open a healthy-looking
+// empty agent over everything it ever kept. Open refuses and leaves
+// every file as it was, the same as damage in a sealed segment.
+func TestDamageInFirstRecordIsCorrupt(t *testing.T) {
+	for name, records := range map[string][]string{
+		"only segment":           {big("r1")},
+		"first of many segments": {big("r1"), big("r2"), big("r3")},
+	} {
+		dir := t.TempDir()
+		writeLog(t, dir, small, records...)
+		damaged := readFile(t, segPath(dir, 1))
+		damaged[40] ^= 0xFF
+		writeFile(t, segPath(dir, 1), damaged)
+
+		if _, _, err := Open(dir, small, nil); !errors.Is(err, ErrCorrupt) {
+			t.Errorf("%s: got %v, want ErrCorrupt", name, err)
+		}
+		if got := fileSize(t, segPath(dir, 1)); got != int64(len(damaged)) {
+			t.Errorf("%s: a corrupt log must not be touched", name)
+		}
+	}
+}
+
 // TestMissingSegmentIsCorrupt: a gap in the numbering means a lost file
 // full of acknowledged records.
 func TestMissingSegmentIsCorrupt(t *testing.T) {

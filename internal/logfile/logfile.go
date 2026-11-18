@@ -407,6 +407,14 @@ func (l *Log) replaySegment(n int, sealed bool, fn func(*record.Record) error, r
 				// here is real.
 				return fmt.Errorf("%w: sealed segment %d: bad record at offset %d: %v", ErrCorrupt, n, off, err)
 			}
+			if n == 1 && off == 0 {
+				// A crash tears only what follows the last fsynced batch; it
+				// cannot unwrite a batch Append already acknowledged. When the
+				// log's very first record will not decode, acknowledged history
+				// was edited or rotted - opening empty over it would silently
+				// erase every memory the agent ever kept.
+				return fmt.Errorf("%w: segment 1: first record is damaged (%v); refusing to open an empty log over %d bytes", ErrCorrupt, err, end)
+			}
 			rep.DroppedBytes, err = cutTail(f, n, off, end, err)
 			if err != nil {
 				return err
